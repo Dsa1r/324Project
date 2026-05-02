@@ -150,4 +150,187 @@ def login_user(user_id, password):
     finally:
         conn.close()
 
+‏# ===== student methods =====
+
+‏def get_student_wallet_info(student_id):
+‏    conn = get_connection()
+‏    try:
+‏        wallet = conn.execute(
+‏            "SELECT wallet_number, balance FROM wallets WHERE owner_id = ? AND owner_type = 'student'",
+‏            (student_id,)
+‏        ).fetchone()
+        
+‏        if wallet:
+‏            return True, "Success", {"wallet_number": wallet["wallet_number"], "balance": wallet["balance"]}
+‏        return False, "Wallet not found", None
+‏    except sqlite3.Error as e:
+‏        return False, f"Error: {e}", None
+‏    finally:
+‏        conn.close()
+
+
+‏def wallet_exists(wallet_number):
+‏    conn = get_connection()
+‏    try:
+‏        result = conn.execute(
+‏            "SELECT wallet_number FROM wallets WHERE wallet_number = ?",
+‏            (wallet_number,)
+‏        ).fetchone()
+‏        return result is not None
+‏    finally:
+‏        conn.close()
+
+
+‏def transfer_money(from_wallet_number, to_wallet_number, amount):
+‏    conn = get_connection()
+‏    try:
+‏        target = conn.execute(
+‏            "SELECT wallet_number FROM wallets WHERE wallet_number = ?",
+‏            (to_wallet_number,)
+‏        ).fetchone()
+        
+‏        if not target:
+‏            return False, "Wallet number does not exist", None
+        
+‏        sender = conn.execute(
+‏            "SELECT balance FROM wallets WHERE wallet_number = ?",
+‏            (from_wallet_number,)
+‏        ).fetchone()
+        
+‏        if sender["balance"] < amount:
+‏            return False, "There is not enough money", None
+        
+‏        conn.execute(
+‏            "UPDATE wallets SET balance = balance - ? WHERE wallet_number = ?",
+‏            (amount, from_wallet_number)
+        )
+‏        conn.execute(
+‏            "UPDATE wallets SET balance = balance + ? WHERE wallet_number = ?",
+‏            (amount, to_wallet_number)
+        )
+        
+‏        conn.commit()
+        
+‏        new_balance = conn.execute(
+‏            "SELECT balance FROM wallets WHERE wallet_number = ?",
+‏            (from_wallet_number,)
+‏        ).fetchone()
+        
+‏        return True, "Transfer successful", {"new_balance": new_balance["balance"]}
+        
+‏    except sqlite3.Error as e:
+‏        return False, f"Error: {e}", None
+‏    finally:
+‏        conn.close()
+
+
+‏# ===== admin methods =====
+
+‏def create_entity_wallet(entity_name):
+‏    conn = get_connection()
+‏    try:
+‏        existing = conn.execute(
+‏            "SELECT wallet_number FROM wallets WHERE owner_type = 'ksu' AND owner_id = ?",
+‏            (entity_name,)
+‏        ).fetchone()
+        
+‏        if existing:
+‏            return False, "This entity already has a wallet", None
+        
+‏        wallet_number = generate_wallet_number(conn)
+‏        created_at = current_datetime()
+        
+‏        conn.execute("""
+‏            INSERT INTO wallets (wallet_number, owner_type, owner_id, balance, created_at)
+‏            VALUES (?, 'ksu', ?, 0, ?)
+‏        """, (wallet_number, entity_name, created_at))
+        
+‏        conn.commit()
+‏        return True, "KSU wallet created", {"wallet_number": wallet_number}
+        
+‏    except sqlite3.Error as e:
+‏        return False, f"Error: {e}", None
+‏    finally:
+‏        conn.close()
+
+
+‏def get_total_entities_balance():
+‏    conn = get_connection()
+‏    try:
+‏        result = conn.execute(
+‏            "SELECT SUM(balance) as total FROM wallets WHERE owner_type = 'ksu'"
+‏        ).fetchone()
+        
+‏        total = result["total"] if result["total"] is not None else 0
+‏        return True, "Success", {"total_balance": total}
+‏    except sqlite3.Error as e:
+‏        return False, f"Error: {e}", None
+‏    finally:
+‏        conn.close()
+
+
+‏def pay_stipends():
+‏    conn = get_connection()
+‏    try:
+‏        conn.execute(
+‏            "UPDATE wallets SET balance = balance + 1000 WHERE owner_type = 'student'"
+        )
+‏        conn.commit()
+‏        return True, "1000 SR deposited to all students", None
+‏    except sqlite3.Error as e:
+‏        return False, f"Error: {e}", None
+‏    finally:
+‏        conn.close()
+
+
+‏def cash_out_entities():
+‏    conn = get_connection()
+‏    try:
+‏        conn.execute(
+‏            "UPDATE wallets SET balance = 0 WHERE owner_type = 'ksu'"
+        )
+‏        conn.commit()
+‏        return True, "All KSU wallets cleared to zero", None
+‏    except sqlite3.Error as e:
+‏        return False, f"Error: {e}", None
+‏    finally:
+‏        conn.close()
+
+
+‏def backup_to_csv():
+‏    conn = get_connection()
+‏    try:
+‏        import csv
+        
+‏        with open("backup.csv", "w", newline="", encoding="utf-8") as f:
+‏            writer = csv.writer(f)
+            
+‏            writer.writerow(["=== STUDENTS ==="])
+‏            writer.writerow(["student_id", "first_name", "last_name", "email", "phone", "created_at"])
+‏            students = conn.execute("SELECT student_id, first_name, last_name, email, phone, created_at FROM students").fetchall()
+‏            for row in students:
+‏                writer.writerow([row["student_id"], row["first_name"], row["last_name"], row["email"], row["phone"], row["created_at"]])
+            
+‏            writer.writerow([])
+‏            writer.writerow(["=== ADMINS ==="])
+‏            writer.writerow(["admin_id", "first_name", "last_name"])
+‏            admins = conn.execute("SELECT admin_id, first_name, last_name FROM admins").fetchall()
+‏            for row in admins:
+‏                writer.writerow([row["admin_id"], row["first_name"], row["last_name"]])
+            
+‏            writer.writerow([])
+‏            writer.writerow(["=== WALLETS ==="])
+‏            writer.writerow(["wallet_number", "owner_type", "owner_id", "balance", "created_at"])
+‏            wallets = conn.execute("SELECT wallet_number, owner_type, owner_id, balance, created_at FROM wallets").fetchall()
+‏            for row in wallets:
+‏                writer.writerow([row["wallet_number"], row["owner_type"], row["owner_id"], row["balance"], row["created_at"]])
+        
+‏        return True, "Backup saved to backup.csv", None
+        
+‏    except Exception as e:
+‏        return False, f"Backup error: {e}", None
+‏    finally:
+‏        conn.close()
+
 #this code is done by ghadah and norah
+
